@@ -24,7 +24,30 @@ config = ConfigParser.RawConfigParser()
 		the mapping between the 'expected' alma fields and the API fields that correspond. 
 		This can be done in a static way, it won't change, only the mapping between the expected and the local field name is dynamic
 """
-
+def create_authoritative_mapping():
+	dict = {'VOLUME':'description',
+			'COPY #':'copy_id', #holding
+			'BARCODE':'barcode',
+			'LOCATION':'location',
+			'STATUS':'base_status',
+			'I TYPE':'policy',
+			'CREATED(ITEM)':'creation_date',
+			'UPDATED(ITEM)':'modification_date',
+			'INVDA':'',
+		#	'TOT_CHKOUT':'', # Can't set through the item record...
+		#	'DATE_LAST_RETURN':'' #won't set these.  These are new items anyway. 
+			'PIECES':'pieces',
+			'PRICE':'' # ??
+			'PUBLIC_NOTE':'public_note',
+			'FULFILMENT_NOTE':'fulfillment_note',
+			'NON_PUBLIC_NOTE_1':'internal_note_1',
+			'NON_PUBLIC_NOTE_2':'internal_note_2',
+			'NON_PUBLIC_NOTE_3':'internal_note_3',
+			'STAT_NOTE_1':'statistics_note_1',
+			'STAT_NOTE_2':'statistics_note_2',
+			'STAT_NOTE_3':'statistics_note_3'
+	}
+	
 
 
 """
@@ -39,7 +62,6 @@ def read_mapping (mapping_file):
 		for row in reader:
 			if row[1]:
 				field_mapping[row[0]] = row[1]
-		#print(field_mapping)
 		return field_mapping
 	finally:
 		f.close()
