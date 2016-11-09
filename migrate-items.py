@@ -34,10 +34,8 @@ def create_authoritative_mapping():
 			'CREATED(ITEM)':'creation_date',
 			'UPDATED(ITEM)':'modification_date',
 			'INVDA':'',
-		#	'TOT_CHKOUT':'', # Can't set through the item record...
-		#	'DATE_LAST_RETURN':'' #won't set these.  These are new items anyway. 
 			'PIECES':'pieces',
-			'PRICE':'' # ??
+			'PRICE':'', # ??
 			'PUBLIC_NOTE':'public_note',
 			'FULFILMENT_NOTE':'fulfillment_note',
 			'NON_PUBLIC_NOTE_1':'internal_note_1',
@@ -47,13 +45,13 @@ def create_authoritative_mapping():
 			'STAT_NOTE_2':'statistics_note_2',
 			'STAT_NOTE_3':'statistics_note_3'
 	}
-	
+	return dict
 
 
 """
 	Read in field_mapping.csv and map all item fields to Alma fields
 """
-def read_mapping (mapping_file):
+def read_mapping(mapping_file):
 	field_mapping = {}
 	f = open(mapping_file, 'rt')
 	try:
@@ -61,7 +59,7 @@ def read_mapping (mapping_file):
 		reader.next() #skip header line
 		for row in reader:
 			if row[1]:
-				field_mapping[row[0]] = row[1]
+				field_mapping[row[0].strip()] = row[1].strip()
 		return field_mapping
 	finally:
 		f.close()
@@ -70,19 +68,53 @@ def read_mapping (mapping_file):
 """
 	Read in location_map.csv and create map between former locations and Alma locations
 """
+def read_location_mapping(loc_map_file):
+	location_mapping = {}
+	f = open(loc_map_file, 'rt')
+	try:
+		reader = csv.reader(f)
+		reader.next()
+		for row in reader:
+			# Mil/Sierra location => [Alma loc code, Alma call number type for loc]
+			location_mapping[row[0].strip()] = [row[3].strip(),row[4].strip()]
+		return location_mapping
+	finally:
+		f.close()
+
 
 
 """
 	Read in status_map.csv and create map between old statuses and current base statuses, and description for note fields
 """
-
-
+def read_status_mapping(status_map_file):
+	status_mapping = {}
+	f = open(status_map_file, 'rt')
+	try:
+		reader = csv.reader(f)
+		reader.next()
+		for row in reader:
+			status_mapping[row[0].strip()] = [row[1].strip(),row[2].strip()]
+		return status_mapping
+	finally:
+		f.close()
 
 
 """
 	Read in itype_map.csv and create map between old itype values and current itype policy codes
 
 """
+def read_itype_mapping(itype_map_file):
+	itype_mapping = {}
+	f = open(itype_map_file, 'rt')
+	try:
+		reader = csv.reader(f)
+		reader.next()
+		for row in reader:
+			itype_mapping[row[0].strip()] = row[2].strip()
+		return itype_mapping
+	finally:
+		f.close()
+
 
 
 """
@@ -95,12 +127,18 @@ def read_mapping (mapping_file):
 """
 
 mapping_file = sys.argv[1]
+location_file = sys.argv[2]
+status_file = sys.argv[3]
+itype_file = sys.argv[4]
 field_mapping = read_mapping(mapping_file)
 print(field_mapping)
-
-
-
-
+auth_map = create_authoritative_mapping()
+location_mapping = read_location_mapping(location_file)
+print(location_mapping)
+status_mapping = read_status_mapping(status_file)
+print(status_mapping)
+itype_mapping = read_itype_mapping(itype_file)
+print(itype_mapping)
 
 
 
