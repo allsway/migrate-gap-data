@@ -4,6 +4,7 @@ import sys
 import csv
 import ConfigParser
 import xml.etree.ElementTree as ET
+from lxml import etree
 
 def createurl(row):
 	bib_id = row[0]
@@ -116,30 +117,77 @@ def read_itype_mapping(itype_map_file):
 		f.close()
 
 
+"""
+	Read in item data in csv format (item_data.csv)
+"""
+def read_items(item_file):
+	f  = open(item_file,'rt')
+	try:
+		reader = csv.reader(f)
+		header = reader.next()
+		for row in reader:
+			oclc = '08387229' #row[1]
+			# Call other functions
+			find_bib(oclc)
+			
+	finally:
+		f.close()
+
+"""
+	Set up item record CSV headers
+"""
+
+
+
+"""
+	Use SRU to find matching bib
+"""
+def find_bib(oclc):
+	# set url and campus code from config later, and pass to function
+	sru = 'https://csu-stan.alma.exlibrisgroup.com/view/sru/' + '01CALS_UST' + '?version=1.2&operation=searchRetrieve&query=alma.all_for_ui=' + oclc
+	response = requests.get(sru)
+
+	bib = ET.fromstring(response.content)
+	for records in bib:
+		for record in records:
+			for recordData in record:
+				for record in recordData:
+					print record.find("./controlfield[@tag='001']")
+#	print(etree.tostring(bib))
+	if response.status_code == 200:
+		# Get the MMS ID for the bib
+		for records in bib.findall('searchRetrieveResponse'):
+		#	print etree.tostring(records)
+			for record_data in records.find('record/recordData'):
+				mms_id = record_data.find("./controlfield[tag='001']")
+				print mms_id
 
 """
 	MAIN
-	Read in item data in csv format (item_data.csv)
 	Check if item exists already in Alma
 	If item doesn't exist, pull bib data based on OCLC number
 	Create item and holding based on above mappings
 	Send item XMl POST request to Alma 
 """
 
+# set these in config file I think
 mapping_file = sys.argv[1]
 location_file = sys.argv[2]
 status_file = sys.argv[3]
 itype_file = sys.argv[4]
+items_file = sys.argv[5]
+
+# read in and map all mappings. 
 field_mapping = read_mapping(mapping_file)
-print(field_mapping)
+#print(field_mapping)
 auth_map = create_authoritative_mapping()
 location_mapping = read_location_mapping(location_file)
-print(location_mapping)
+#print(location_mapping)
 status_mapping = read_status_mapping(status_file)
-print(status_mapping)
+#print(status_mapping)
 itype_mapping = read_itype_mapping(itype_file)
-print(itype_mapping)
-
+#print(itype_mapping)
+read_items(items_file)
 
 
 
