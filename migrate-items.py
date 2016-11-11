@@ -4,7 +4,7 @@ import sys
 import csv
 import ConfigParser
 import xml.etree.ElementTree as ET
-from lxml import etree
+#from lxml import etree
 
 def createurl(row):
 	bib_id = row[0]
@@ -127,9 +127,9 @@ def read_items(item_file):
 		header = reader.next()
 		for row in reader:
 			oclc = '08387229' #row[1]
-			# Call other functions
-			find_bib(oclc)
-			
+			# Get bib record MMS ID, do something about multi-match. 
+			mms_id = find_mms_id(oclc)
+			print mms_id
 	finally:
 		f.close()
 
@@ -142,25 +142,19 @@ def read_items(item_file):
 """
 	Use SRU to find matching bib
 """
-def find_bib(oclc):
+def find_mms_id(oclc):
 	# set url and campus code from config later, and pass to function
 	sru = 'https://csu-stan.alma.exlibrisgroup.com/view/sru/' + '01CALS_UST' + '?version=1.2&operation=searchRetrieve&query=alma.all_for_ui=' + oclc
 	response = requests.get(sru)
-
 	bib = ET.fromstring(response.content)
-	for records in bib:
-		for record in records:
-			for recordData in record:
-				for record in recordData:
-					print record.find("./controlfield[@tag='001']")
-#	print(etree.tostring(bib))
 	if response.status_code == 200:
-		# Get the MMS ID for the bib
-		for records in bib.findall('searchRetrieveResponse'):
-		#	print etree.tostring(records)
-			for record_data in records.find('record/recordData'):
-				mms_id = record_data.find("./controlfield[tag='001']")
-				print mms_id
+		for records in bib:
+			for record in records:
+				for recordData in record:
+					for record in recordData:
+						return record.find("./controlfield[@tag='001']").text
+
+
 
 """
 	MAIN
@@ -171,21 +165,21 @@ def find_bib(oclc):
 """
 
 # set these in config file I think
-mapping_file = sys.argv[1]
-location_file = sys.argv[2]
-status_file = sys.argv[3]
-itype_file = sys.argv[4]
-items_file = sys.argv[5]
+#mapping_file = sys.argv[1]
+#location_file = sys.argv[2]
+#status_file = sys.argv[3]
+#itype_file = sys.argv[4]
+items_file = sys.argv[1]
 
 # read in and map all mappings. 
-field_mapping = read_mapping(mapping_file)
+#field_mapping = read_mapping(mapping_file)
 #print(field_mapping)
-auth_map = create_authoritative_mapping()
-location_mapping = read_location_mapping(location_file)
+#auth_map = create_authoritative_mapping()
+#location_mapping = read_location_mapping(location_file)
 #print(location_mapping)
-status_mapping = read_status_mapping(status_file)
+#status_mapping = read_status_mapping(status_file)
 #print(status_mapping)
-itype_mapping = read_itype_mapping(itype_file)
+#itype_mapping = read_itype_mapping(itype_file)
 #print(itype_mapping)
 read_items(items_file)
 
