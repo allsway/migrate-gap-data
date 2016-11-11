@@ -15,10 +15,20 @@ def createurl(row):
 
 # Read campus configuration parameters
 config = ConfigParser.RawConfigParser()
-#config.read(sys.argv[1])
-#apikey = config.get('Params', 'apikey')
-#baseurl = config.get('Params','baseurl')
-#campuscode =  config.get('Params', 'campuscode')
+config.read(sys.argv[1])
+
+def get_key():
+	return config.get('Params', 'apikey')
+	
+def get_campus_code():
+	return config.get('Params', 'campuscode')
+	
+def get_sru_base():
+	return config.get('Params', 'sru')
+	
+def get_base_url():
+	return config.get('Params', 'baseurl')
+
 
 """
 	Set up authoritative mapping:
@@ -127,9 +137,16 @@ def read_items(item_file):
 		header = reader.next()
 		for row in reader:
 			oclc = '08387229' #row[1]
+			# need to do an index to column label mapping here! 
+			location = row[7]
 			# Get bib record MMS ID, do something about multi-match. 
 			mms_id = find_mms_id(oclc)
 			print mms_id
+			holding_id = check_for_holdings(mms_id,location)
+			if holding_id == 0:
+				make_holding(mms_id)
+			# create_item()
+			print holding_id
 	finally:
 		f.close()
 
@@ -138,13 +155,36 @@ def read_items(item_file):
 """
 
 
+"""
+	Check if holding record exists
+"""
+def check_for_holdings(bib_mms_id,loc):
+	holding_url = get_base_url() + '/bibs/' + bib_mms_id + '/holdings?apikey=' + get_key()
+	response = requests.get(holding_url)
+	holdings = ET.fromstring(response.content)
+	if response.status_code == 200:
+		# Check if there are any holdings with a location match.  return holding mms_id if so
+		for holding in holdings.findall("holding"):
+			location = holding.find("location").text
+			if location:
+				# need to add a location mapping here. location_map(location)
+				if location.strip() == loc.strip():
+					return holding.find("holding_id").text
+				else:
+					return 0
+			
+""""
+	Create holding record if it doesn't already exist
+"""
+def make_holding(bib_mms_id):
+	post_url = get_base_url() + '/bibs/' + bib_mms_id + '/holdings?apikey=' + get_key()
 
 """
 	Use SRU to find matching bib
 """
 def find_mms_id(oclc):
 	# set url and campus code from config later, and pass to function
-	sru = 'https://csu-stan.alma.exlibrisgroup.com/view/sru/' + '01CALS_UST' + '?version=1.2&operation=searchRetrieve&query=alma.all_for_ui=' + oclc
+	sru =  get_sru_base() + get_campus_code() + '?version=1.2&operation=searchRetrieve&query=alma.all_for_ui=' + oclc
 	response = requests.get(sru)
 	bib = ET.fromstring(response.content)
 	if response.status_code == 200:
@@ -169,7 +209,7 @@ def find_mms_id(oclc):
 #location_file = sys.argv[2]
 #status_file = sys.argv[3]
 #itype_file = sys.argv[4]
-items_file = sys.argv[1]
+items_file = sys.argv[2]
 
 # read in and map all mappings. 
 #field_mapping = read_mapping(mapping_file)
