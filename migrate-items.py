@@ -31,6 +31,9 @@ def get_base_url():
 	
 def get_field_mapping():
 	return config.get('Params', 'fieldmap')
+	
+def get_location_mapping():
+	return config.get('Params', 'locationmap')
 
 """
 	Set up authoritative mapping:
@@ -89,8 +92,8 @@ def read_location_mapping(loc_map_file):
 		reader = csv.reader(f)
 		reader.next()
 		for row in reader:
-			# Mil/Sierra location => [Alma loc code, Alma call number type for loc]
-			location_mapping[row[0].strip()] = [row[3].strip(),row[4].strip()]
+			# Mil/Sierra location => [Alma loc code, Alma Library, Alma call number type for loc]
+			location_mapping[row[0].strip()] = {'location': row[3].strip(),'library': row[2].strip(), 'callnum' : row[4].strip()}
 		return location_mapping
 	finally:
 		f.close()
@@ -173,17 +176,19 @@ def read_items(item_file):
 		header = reader.next()
 		indices = map_headers(header)
 		for row in reader:
-			oclc = '08387229' #row[1]
+			oclc =  row[1]
 			# Check if bib record exists, based on OCLC number.  If it exists, get mms id  
 			mms_id = find_mms_id(oclc)
 			print mms_id
 			if 'LOCATION' in indices:
 				location = row[indices['LOCATION']]
+			# Run location mapping here
+			loc_row = read_location_mapping(get_location_mapping())
 			# Check if holding with same location as item exists.  If so, proceed to attach item
 			holding_id = check_for_holdings(mms_id,location)
 			# If holding doesn't already exist, create holding, then proceed to attach items
-			if holding_id == 0:
-				make_holding(mms_id)
+			if holding_id is None:
+				holding_id = make_holding(mms_id,loc_row[location.strip()])
 			# create_item()
 			print holding_id
 			set_fields(indices,row)
@@ -209,7 +214,51 @@ def map_headers(header):
 		position += 1
 	print(index_map)
 	return index_map
+	
+"""
+	Get former system-to-Alma location mapping, and apply new location to newly created holding
+"""		
+#def get_loc_info():
 		
+	
+	
+		
+""""
+	Create holding record if it doesn't already exist
+	Basic holding structure that is posted to API is:
+	
+	<holding>
+		<record>
+			<datafield ind1='{call number type}' tag='852'>
+				<subfield code='b'>{location}</subfield>
+				<subfield code='c'>{library}</subfield>
+			</datafield>
+		</record>
+	</holding>
+"""
+def make_holding(bib_mms_id,loc_row):
+	post_url = get_base_url() + '/bibs/' + str(bib_mms_id) + '/holdings?apikey=' + get_key()		
+	headers = {"Content-Type": "application/xml"}
+	holding = ET.Element('holding')
+	record = ET.SubElement(holding,'record')
+	datafield = ET.SubElement(record,'datafield')
+	datafield.set('ind1',loc_row['callnum'])
+	datafield.set('tag','852')
+	subfield1 = ET.SubElement(datafield,'subfield')
+	subfield1.set('code','b')
+	subfield1.text = loc_row['library']
+	subfield2 = ET.SubElement(datafield,'subfield')
+	subfield2.set('code','c')
+	subfield2.text = loc_row['location']
+	print(ET.tostring(holding))
+	r = requests.post(post_url,data=ET.tostring(holding),headers=headers)
+	response = ET.fromstring(r.content)
+	print(ET.tostring(response))
+	if r.status_code == 200:
+		return response.find("holding_id").text
+
+			
+	
 
 """
 	Check if holding record exists
@@ -227,13 +276,9 @@ def check_for_holdings(bib_mms_id,loc):
 				if location.strip() == loc.strip():
 					return holding.find("holding_id").text
 				else:
-					return 0
+					return None
 			
-""""
-	Create holding record if it doesn't already exist
-"""
-def make_holding(bib_mms_id):
-	post_url = get_base_url() + '/bibs/' + bib_mms_id + '/holdings?apikey=' + get_key()
+
 
 """
 	Use SRU to find matching bib
