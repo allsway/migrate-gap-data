@@ -4,13 +4,9 @@ import sys
 import csv
 import ConfigParser
 import xml.etree.ElementTree as ET
-#from lxml import etree
 
-def createurl(row):
-	bib_id = row[0]
-	holding_id = row[1]
-	item_id = row[2]
-	return '/almaws/v1/bibs/' + bib_id + '/holdings/'+ holding_id +'/items/' + item_id; 
+def create_url(mms_id,holding_id):
+	return get_base_url() +  '/almaws/v1/bibs/' + mms_id + '/holdings/'+ holding_id +'/items/'; 
 	
 
 # Read campus configuration parameters
@@ -34,6 +30,12 @@ def get_field_mapping():
 	
 def get_location_mapping():
 	return config.get('Params', 'locationmap')
+	
+def get_status_mapping():
+	return config.get('Params', 'statusmap')
+
+def get_itype_mapping():
+	return config.get('Params', 'itypemap')
 
 """
 	Set up authoritative mapping:
@@ -42,17 +44,17 @@ def get_location_mapping():
 """
 def get_authoritative_mapping():
 	dict = {'VOLUME':'description',
-			'035|a': 'oclc',
-			'COPY #':'copy_id', #holding
+			'oclc': 'oclc',
+		#	'COPY #':'copy_id', #holding
 			'BARCODE':'barcode',
 			'LOCATION':'location',
 			'STATUS':'base_status',
 			'I TYPE':'policy',
 			'CREATED(ITEM)':'creation_date',
 			'UPDATED(ITEM)':'modification_date',
-			'INVDA':'',
+		#	'INVDA':'',
 			'PIECES':'pieces',
-			'PRICE':'', # ??
+		#	'PRICE':'', # ??
 			'PUBLIC_NOTE':'public_note',
 			'FULFILMENT_NOTE':'fulfillment_note',
 			'NON_PUBLIC_NOTE_1':'internal_note_1',
@@ -84,6 +86,8 @@ def read_mapping(mapping_file):
 
 """
 	Read in location_map.csv and create map between former locations and Alma locations
+	Mil/Sierra location => [Alma loc code, Alma Library, Alma call number type for loc]
+
 """
 def read_location_mapping(loc_map_file):
 	location_mapping = {}
@@ -92,7 +96,6 @@ def read_location_mapping(loc_map_file):
 		reader = csv.reader(f)
 		reader.next()
 		for row in reader:
-			# Mil/Sierra location => [Alma loc code, Alma Library, Alma call number type for loc]
 			location_mapping[row[0].strip()] = {'location': row[3].strip(),'library': row[2].strip(), 'callnum' : row[4].strip()}
 		return location_mapping
 	finally:
@@ -110,7 +113,7 @@ def read_status_mapping(status_map_file):
 		reader = csv.reader(f)
 		reader.next()
 		for row in reader:
-			status_mapping[row[0].strip()] = [row[1].strip(),row[2].strip()]
+			status_mapping[row[0].strip()] = {'status_description': row[1].strip(),'base_status' : row[2].strip()}
 		return status_mapping
 	finally:
 		f.close()
@@ -133,38 +136,6 @@ def read_itype_mapping(itype_map_file):
 		f.close()
 
 
-"""
-
-"""
-def set_fields(indices,row):
-	if 'LOCATION' in indices:
-		location = row[indices['LOCATION']]
-	if 'BARCODE' in indices:
-		barcode = row[indices['BARCODE']]
-	if 'I TYPE' in indices:
-		itype = row[indices['I TYPE']]
-	if 'STATUS' in indices:
-		status = row[indices['STATUS']]
-	if 'CALL #(BIBLIO)' in indices:
-		call_number = row[indices['CALL #(BIBLIO)']]
-	if 'CREATED(ITEM)' in indices:
-		created = row[indices['CREATED(ITEM)']]
-	if 'UPDATED(ITEM)' in indices:
-		updated = row[indices['UPDATED(ITEM)']]
-	if 'FULFILMENT_NOTE' in indices:
-		ful_note_1 = row[indices['FULFILMENT_NOTE']]
-	if 'STAT_NOTE_1' in indices:				
-		stat_note_1 = row[indices['STAT_NOTE_1']]
-	if 'STAT_NOTE_2' in indices:
-		stat_note_2 = row[indices['STAT_NOTE_2']]
-	if 'STAT_NOTE_3' in indices:
-		stat_note_3 = row[indices['STAT_NOTE_3']]
-	if 'NON_PULIC_NOTE_1' in indices:
-		int_note_1 = row[indices['NON_PUBLIC_NOTE_1']]
-	if 'NON_PULIC_NOTE_2' in indices:
-		int_note_2 = row[indices['NON_PUBLIC_NOTE_2']]
-	if 'NON_PULIC_NOTE_3' in indices:
-		int_note_3 = row[indices['NON_PUBLIC_NOTE_3']]
 
 """
 	Read in item data in csv format (item_data.csv)
@@ -175,30 +146,67 @@ def read_items(item_file):
 		reader = csv.reader(f)
 		header = reader.next()
 		indices = map_headers(header)
+		itype_map = read_itype_mapping(get_itype_mapping())
+		status_map = read_status_mapping(get_status_mapping())
+		loc_row = read_location_mapping(get_location_mapping())
 		for row in reader:
-			oclc =  row[1]
-			# Check if bib record exists, based on OCLC number.  If it exists, get mms id  
-			mms_id = find_mms_id(oclc)
-			print mms_id
-			if 'LOCATION' in indices:
-				location = row[indices['LOCATION']]
-			# Run location mapping here
-			loc_row = read_location_mapping(get_location_mapping())
-			# Check if holding with same location as item exists.  If so, proceed to attach item
-			holding_id = check_for_holdings(mms_id,location)
-			# If holding doesn't already exist, create holding, then proceed to attach items
-			if holding_id is None:
-				holding_id = make_holding(mms_id,loc_row[location.strip()])
-			# create_item()
-			print holding_id
-			set_fields(indices,row)
+			item_url = create_bibs(row,indices,loc_row)
+			make_item(row,indices,itype_map,status_map,loc_row)
+
 	finally:
 		f.close()
 
 """
-	Set up item record CSV headers
+	Get bib info and create/get holdings for the item we are adding to repository 
 """
+def create_bibs(row,indices,loc_row):
+	oclc =  row[indices['oclc']].strip()
+	# Check if bib record exists, based on OCLC number.  If it exists, get mms id  
+	mms_id = find_mms_id(oclc)
+	if mms_id is not None:
+		print mms_id
+		if 'LOCATION' in indices:
+			location = row[indices['LOCATION']]
+		# Check if holding with same location as item exists.  If so, proceed to attach item
+		holding_id = check_for_holdings(mms_id,loc_row[location.strip()])
+		# If holding doesn't already exist, create holding, then proceed to attach items
+		if holding_id is None:
+			#holding_id = make_holding(mms_id,loc_row[location.strip()])
+			print holding_id
+		print holding_id
+		url = create_url(mms_id,holding_id)
+		return url
+	else:
+		print "Bib record with OCLC number " + oclc + " not currently in repository"
 
+
+"""
+	Create item record post data from item record CSV export, using authoritative field mapping and field mapping dict
+"""
+def make_item(row,indices,itype_map,status_map,loc_map):
+	mapping = get_authoritative_mapping()
+	item = ET.Element('item_data')
+	for key, value in mapping.iteritems():
+		if key in indices:
+			# exceptional mapping conditions
+			if key == 'I TYPE':
+				content = itype_map[row[indices[key]]]
+			elif key == 'STATUS':
+				content = status_map[row[indices[key]]]['base_status']
+			elif key == 'LOCATION':
+				content = loc_map[row[indices[key]].strip()]['location']
+			elif key == 'oclc':
+				value = None
+			elif key == 'NON_PUBLIC_NOTE_1' and status_map[row[indices['STATUS']]]['status_description']  != 'AVAILABLE':
+				content =  "Status: " + status_map[row[indices['STATUS']]]['status_description'] 
+				if row[indices[key]]:
+					content +=  " | " + row[indices[key]]
+			else:
+				content = row[indices[key]]
+			element = ET.SubElement(item, value)
+			element.text = content
+	print (ET.tostring(item))
+	
 
 """
 	Maps authoritative headers to indices	
@@ -214,13 +222,7 @@ def map_headers(header):
 		position += 1
 	print(index_map)
 	return index_map
-	
-"""
-	Get former system-to-Alma location mapping, and apply new location to newly created holding
-"""		
-#def get_loc_info():
-		
-	
+				
 	
 		
 """"
@@ -235,6 +237,8 @@ def map_headers(header):
 			</datafield>
 		</record>
 	</holding>
+	
+	Returns holding ID for newly created holding
 """
 def make_holding(bib_mms_id,loc_row):
 	post_url = get_base_url() + '/bibs/' + str(bib_mms_id) + '/holdings?apikey=' + get_key()		
@@ -262,18 +266,18 @@ def make_holding(bib_mms_id,loc_row):
 
 """
 	Check if holding record exists
+	Check if mapped location from current ILS to Alma location mapping matches with any current holdings
+	Returns mms ID for holding if one exists
 """
 def check_for_holdings(bib_mms_id,loc):
 	holding_url = get_base_url() + '/bibs/' + str(bib_mms_id) + '/holdings?apikey=' + get_key()
 	response = requests.get(holding_url)
 	holdings = ET.fromstring(response.content)
 	if response.status_code == 200:
-		# Check if there are any holdings with a location match.  return holding mms_id if so
 		for holding in holdings.findall("holding"):
 			location = holding.find("location").text
 			if location:
-				# need to add a location mapping here. location_map(location)
-				if location.strip() == loc.strip():
+				if location.strip() == loc['location'].strip():
 					return holding.find("holding_id").text
 				else:
 					return None
@@ -306,22 +310,7 @@ def find_mms_id(oclc):
 """
 
 # set these in config file I think
-mapping_file = sys.argv[3]
-#location_file = sys.argv[2]
-#status_file = sys.argv[3]
-#itype_file = sys.argv[4]
 items_file = sys.argv[2]
-
-# read in and map all mappings. 
-#field_mapping = read_mapping(mapping_file)
-#print(field_mapping)
-#auth_map = create_authoritative_mapping()
-#location_mapping = read_location_mapping(location_file)
-#print(location_mapping)
-#status_mapping = read_status_mapping(status_file)
-#print(status_mapping)
-#itype_mapping = read_itype_mapping(itype_file)
-#print(itype_mapping)
 read_items(items_file)
 
 
