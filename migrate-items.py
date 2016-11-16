@@ -6,7 +6,7 @@ import ConfigParser
 import xml.etree.ElementTree as ET
 
 def create_url(mms_id,holding_id):
-	return get_base_url() +  '/almaws/v1/bibs/' + mms_id + '/holdings/'+ holding_id +'/items/'; 
+	return get_base_url() +  '/bibs/' + mms_id + '/holdings/'+ holding_id +'/items?apikey=' + get_key(); 
 	
 
 # Read campus configuration parameters
@@ -43,26 +43,25 @@ def get_itype_mapping():
 		This can be done in a static way, it won't change, only the mapping between the expected and the local field name is dynamic
 """
 def get_authoritative_mapping():
-	dict = {'VOLUME':'description',
-			'oclc': 'oclc',
+	dict = {
+		'BARCODE':'barcode',
+		'CREATED(ITEM)':'creation_date',
+		'UPDATED(ITEM)':'modification_date',
+		'STATUS':'base_status',
+		'I TYPE':'policy',
+		'VOLUME':'description',
+		'oclc': 'oclc',
 		#	'COPY #':'copy_id', #holding
-			'BARCODE':'barcode',
-			'LOCATION':'location',
-			'STATUS':'base_status',
-			'I TYPE':'policy',
-			'CREATED(ITEM)':'creation_date',
-			'UPDATED(ITEM)':'modification_date',
-		#	'INVDA':'',
-			'PIECES':'pieces',
-		#	'PRICE':'', # ??
-			'PUBLIC_NOTE':'public_note',
-			'FULFILMENT_NOTE':'fulfillment_note',
-			'NON_PUBLIC_NOTE_1':'internal_note_1',
-			'NON_PUBLIC_NOTE_2':'internal_note_2',
-			'NON_PUBLIC_NOTE_3':'internal_note_3',
-			'STAT_NOTE_1':'statistics_note_1',
-			'STAT_NOTE_2':'statistics_note_2',
-			'STAT_NOTE_3':'statistics_note_3'
+		'LOCATION':'location',
+		'PIECES':'pieces',
+ 		'PUBLIC_NOTE':'public_note',
+		'FULFILMENT_NOTE':'fulfillment_note',
+		'NON_PUBLIC_NOTE_1':'internal_note_1',
+		'NON_PUBLIC_NOTE_2':'internal_note_2',
+		'NON_PUBLIC_NOTE_3':'internal_note_3',
+		'STAT_NOTE_1':'statistics_note_1',
+		'STAT_NOTE_2':'statistics_note_2',
+		'STAT_NOTE_3':'statistics_note_3'
 	}
 	return dict
 
@@ -151,8 +150,12 @@ def read_items(item_file):
 		loc_row = read_location_mapping(get_location_mapping())
 		for row in reader:
 			item_url = create_bibs(row,indices,loc_row)
-			make_item(row,indices,itype_map,status_map,loc_row)
-
+			print item_url
+			if item_url:
+				item_xml = make_item(row,indices,itype_map,status_map,loc_row)
+				headers = {"Content-Type": "application/xml"}
+				r = requests.post(item_url,data=ET.tostring(item_xml),headers=headers)
+				print(r.content)
 	finally:
 		f.close()
 
@@ -167,12 +170,11 @@ def create_bibs(row,indices,loc_row):
 		print mms_id
 		if 'LOCATION' in indices:
 			location = row[indices['LOCATION']]
-		# Check if holding with same location as item exists.  If so, proceed to attach item
+		# Check if holding with same location as item exists. 
 		holding_id = check_for_holdings(mms_id,loc_row[location.strip()])
-		# If holding doesn't already exist, create holding, then proceed to attach items
+		# If holding doesn't already exist, create holding
 		if holding_id is None:
-			#holding_id = make_holding(mms_id,loc_row[location.strip()])
-			print holding_id
+			holding_id = make_holding(mms_id,loc_row[location.strip()])
 		print holding_id
 		url = create_url(mms_id,holding_id)
 		return url
@@ -185,7 +187,8 @@ def create_bibs(row,indices,loc_row):
 """
 def make_item(row,indices,itype_map,status_map,loc_map):
 	mapping = get_authoritative_mapping()
-	item = ET.Element('item_data')
+	item_data = ET.Element('item')
+	item = ET.SubElement(item_data,'item_data')
 	for key, value in mapping.iteritems():
 		if key in indices:
 			# exceptional mapping conditions
@@ -195,9 +198,11 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 				content = status_map[row[indices[key]]]['base_status']
 			elif key == 'LOCATION':
 				content = loc_map[row[indices[key]].strip()]['location']
+				library = ET.SubElement(item,'library')
+				library.text = loc_map[row[indices[key]].strip()]['library']
 			elif key == 'oclc':
 				value = None
-			elif key == 'NON_PUBLIC_NOTE_1' and status_map[row[indices['STATUS']]]['status_description']  != 'AVAILABLE':
+			elif key == 'NON_PUBLIC_NOTE_1' and row[indices['STATUS']]  != '-':
 				content =  "Status: " + status_map[row[indices['STATUS']]]['status_description'] 
 				if row[indices[key]]:
 					content +=  " | " + row[indices[key]]
@@ -205,7 +210,9 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 				content = row[indices[key]]
 			element = ET.SubElement(item, value)
 			element.text = content
-	print (ET.tostring(item))
+		#also add physical_material_type
+	print (ET.tostring(item_data))
+	return item
 	
 
 """
@@ -226,9 +233,7 @@ def map_headers(header):
 	
 		
 """"
-	Create holding record if it doesn't already exist
-	Basic holding structure that is posted to API is:
-	
+	Creates holding with the following XML structure
 	<holding>
 		<record>
 			<datafield ind1='{call number type}' tag='852'>
@@ -238,11 +243,9 @@ def map_headers(header):
 		</record>
 	</holding>
 	
-	Returns holding ID for newly created holding
+	Returns holding XML 
 """
-def make_holding(bib_mms_id,loc_row):
-	post_url = get_base_url() + '/bibs/' + str(bib_mms_id) + '/holdings?apikey=' + get_key()		
-	headers = {"Content-Type": "application/xml"}
+def get_holding_xml(loc_row):
 	holding = ET.Element('holding')
 	record = ET.SubElement(holding,'record')
 	datafield = ET.SubElement(record,'datafield')
@@ -254,6 +257,17 @@ def make_holding(bib_mms_id,loc_row):
 	subfield2 = ET.SubElement(datafield,'subfield')
 	subfield2.set('code','c')
 	subfield2.text = loc_row['location']
+	return holding
+
+
+"""
+	Creates post request with holding xml data to create new holding.  
+	Returns holding MMS ID to be used for item creation
+"""
+def make_holding(bib_mms_id,loc_row):
+	post_url = get_base_url() + '/bibs/' + str(bib_mms_id) + '/holdings?apikey=' + get_key()		
+	headers = {"Content-Type": "application/xml"}
+	holding = get_holding_xml(loc_row)
 	print(ET.tostring(holding))
 	r = requests.post(post_url,data=ET.tostring(holding),headers=headers)
 	response = ET.fromstring(r.content)
@@ -285,7 +299,8 @@ def check_for_holdings(bib_mms_id,loc):
 
 
 """
-	Use SRU to find matching bib
+	Use SRU to find matching bib record based on OCLC number. 
+	Returns MMS ID for the matching bib record. 
 """
 def find_mms_id(oclc):
 	# set url and campus code from config later, and pass to function
