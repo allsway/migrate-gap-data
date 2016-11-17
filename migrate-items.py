@@ -51,7 +51,6 @@ def get_authoritative_mapping():
 		'I TYPE':'policy',
 		'VOLUME':'description',
 		'oclc': 'oclc',
-		#	'COPY #':'copy_id', #holding
 		'LOCATION':'location',
 		'PIECES':'pieces',
  		'PUBLIC_NOTE':'public_note',
@@ -135,6 +134,23 @@ def read_itype_mapping(itype_map_file):
 		f.close()
 
 
+"""
+
+"""
+def post_item(item_url,item_xml):
+	item = ET.Element('item')
+	bib_data = ET.SubElement(item,'bib_data')
+	bib_id = ET.SubElement(bib_data,'mms_id')
+	bib_id.text = item_url.split("/")[6]
+	holding_data = ET.SubElement(item,'holding_data')
+	holding_id = ET.SubElement(holding_data,'holding_id')
+	holding_id.text = item_url.split("/")[8]
+	item.append(item_xml)
+	print ET.tostring(item)
+	headers = {"Content-Type": "application/xml"}
+	r = requests.post(item_url,data=ET.tostring(item),headers=headers)
+	print r.content
+
 
 """
 	Read in item data in csv format (item_data.csv)
@@ -153,9 +169,7 @@ def read_items(item_file):
 			print item_url
 			if item_url:
 				item_xml = make_item(row,indices,itype_map,status_map,loc_row)
-				headers = {"Content-Type": "application/xml"}
-				r = requests.post(item_url,data=ET.tostring(item_xml),headers=headers)
-				print(r.content)
+				post_item(item_url,item_xml)
 	finally:
 		f.close()
 
@@ -169,12 +183,11 @@ def create_bibs(row,indices,loc_row):
 	if mms_id is not None:
 		print mms_id
 		if 'LOCATION' in indices:
-			location = row[indices['LOCATION']]
-		# Check if holding with same location as item exists. 
-		holding_id = check_for_holdings(mms_id,loc_row[location.strip()])
+			location = row[indices['LOCATION']].strip()
+			holding_id = check_for_holdings(mms_id,loc_row[location])
 		# If holding doesn't already exist, create holding
 		if holding_id is None:
-			holding_id = make_holding(mms_id,loc_row[location.strip()])
+			holding_id = make_holding(mms_id,loc_row[location])
 		print holding_id
 		url = create_url(mms_id,holding_id)
 		return url
@@ -187,8 +200,7 @@ def create_bibs(row,indices,loc_row):
 """
 def make_item(row,indices,itype_map,status_map,loc_map):
 	mapping = get_authoritative_mapping()
-	item_data = ET.Element('item')
-	item = ET.SubElement(item_data,'item_data')
+	item = ET.Element('item_data')
 	for key, value in mapping.iteritems():
 		if key in indices:
 			# exceptional mapping conditions
@@ -210,8 +222,9 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 				content = row[indices[key]]
 			element = ET.SubElement(item, value)
 			element.text = content
-		#also add physical_material_type
-	print (ET.tostring(item_data))
+	# also add physical_material_type in order to post item
+	element = ET.SubElement(item,'physical_material_type')
+	element.text = 'BOOK' # either map from ITYPE, try and get from bib or just set to default. 
 	return item
 	
 
