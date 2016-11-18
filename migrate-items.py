@@ -3,15 +3,10 @@ import requests
 import sys
 import csv
 import ConfigParser
+import logging
 import xml.etree.ElementTree as ET
 
-def create_url(mms_id,holding_id):
-	return get_base_url() +  '/bibs/' + mms_id + '/holdings/'+ holding_id +'/items?apikey=' + get_key(); 
-	
 
-# Read campus configuration parameters
-config = ConfigParser.RawConfigParser()
-config.read(sys.argv[1])
 
 def get_key():
 	return config.get('Params', 'apikey')
@@ -36,6 +31,11 @@ def get_status_mapping():
 
 def get_itype_mapping():
 	return config.get('Params', 'itypemap')
+	
+	
+def create_url(mms_id,holding_id):
+	return get_base_url() +  '/bibs/' + mms_id + '/holdings/'+ holding_id +'/items?apikey=' + get_key(); 
+		
 
 """
 	Set up authoritative mapping:
@@ -135,7 +135,7 @@ def read_itype_mapping(itype_map_file):
 
 
 """
-
+	Posts complete XML to Alma, including bib_data, holding_data and item_data elements
 """
 def post_item(item_url,item_xml):
 	item = ET.Element('item')
@@ -166,10 +166,11 @@ def read_items(item_file):
 		loc_row = read_location_mapping(get_location_mapping())
 		for row in reader:
 			item_url = create_bibs(row,indices,loc_row)
-			print item_url
 			if item_url:
 				item_xml = make_item(row,indices,itype_map,status_map,loc_row)
 				post_item(item_url,item_xml)
+			else:
+				logging.info("Failed to create holdings, current item URL: " + item_url)
 	finally:
 		f.close()
 
@@ -192,11 +193,12 @@ def create_bibs(row,indices,loc_row):
 		url = create_url(mms_id,holding_id)
 		return url
 	else:
-		print "Bib record with OCLC number " + oclc + " not currently in repository"
+		logging.info("Bib record with OCLC number " + oclc + " not currently in repository")
 
 
 """
-	Create item record post data from item record CSV export, using authoritative field mapping and field mapping dict
+	Create item_data xml content, based on mapping conditions.  
+	Returns <item_data> Element
 """
 def make_item(row,indices,itype_map,status_map,loc_map):
 	mapping = get_authoritative_mapping()
@@ -337,7 +339,12 @@ def find_mms_id(oclc):
 	Send item XMl POST request to Alma 
 """
 
-# set these in config file I think
+# Read campus configuration parameters
+config = ConfigParser.RawConfigParser()
+config.read(sys.argv[1])
+
+logging.basicConfig(filename='status.log',level=logging.DEBUG)
+
 items_file = sys.argv[2]
 read_items(items_file)
 
