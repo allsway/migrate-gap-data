@@ -45,8 +45,6 @@ def create_url(mms_id,holding_id):
 def get_authoritative_mapping():
 	dict = {
 		'BARCODE':'barcode',
-		'CREATED(ITEM)':'creation_date',
-		'UPDATED(ITEM)':'modification_date',
 		'STATUS':'base_status',
 		'I TYPE':'policy',
 		'VOLUME':'description',
@@ -134,6 +132,7 @@ def read_itype_mapping(itype_map_file):
 		f.close()
 
 
+
 """
 	Posts complete XML to Alma, including bib_data, holding_data and item_data elements
 """
@@ -150,6 +149,8 @@ def post_item(item_url,item_xml):
 	headers = {"Content-Type": "application/xml"}
 	r = requests.post(item_url,data=ET.tostring(item),headers=headers)
 	print r.content
+	if r.status_code != 200:
+		logging.info("Failed to create item for: " + item_url)
 
 
 """
@@ -165,7 +166,7 @@ def read_items(item_file):
 		status_map = read_status_mapping(get_status_mapping())
 		loc_row = read_location_mapping(get_location_mapping())
 		for row in reader:
-			item_url = create_bibs(row,indices,loc_row)
+			item_url = get_holding(row,indices,loc_row)
 			if item_url:
 				item_xml = make_item(row,indices,itype_map,status_map,loc_row)
 				post_item(item_url,item_xml)
@@ -177,14 +178,14 @@ def read_items(item_file):
 """
 	Get bib info and create/get holdings for the item we are adding to repository 
 """
-def create_bibs(row,indices,loc_row):
-	oclc =  row[indices['oclc']].strip()
+def get_holding(row,indices,loc_row):
+	oclc =  row[indices['oclc']['position']].strip()
 	# Check if bib record exists, based on OCLC number.  If it exists, get mms id  
 	mms_id = find_mms_id(oclc)
 	if mms_id is not None:
 		print mms_id
 		if 'LOCATION' in indices:
-			location = row[indices['LOCATION']].strip()
+			location = row[indices['LOCATION']['position']].strip()
 			holding_id = check_for_holdings(mms_id,loc_row[location])
 		# If holding doesn't already exist, create holding
 		if holding_id is None:
@@ -193,7 +194,7 @@ def create_bibs(row,indices,loc_row):
 		url = create_url(mms_id,holding_id)
 		return url
 	else:
-		logging.info("Bib record with OCLC number " + oclc + " not currently in repository")
+		logging.info("Bib record with OCLC number " + oclc + " not found in repository")
 
 
 """
@@ -204,26 +205,35 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 	mapping = get_authoritative_mapping()
 	item = ET.Element('item_data')
 	for key, value in mapping.iteritems():
+		if key == 'NON_PUBLIC_NOTE_3' and key not in indices:
+			 content = 'migration note: tech_freeze_migration'
+			 element = ET.SubElement(item, value)
+			 element.text = content
 		if key in indices:
 			# exceptional mapping conditions
 			if key == 'I TYPE':
-				content = itype_map[row[indices[key]]]
+				content = itype_map[row[indices[key]['position']]]
 			elif key == 'STATUS':
-				content = status_map[row[indices[key]]]['base_status']
+				content = status_map[row[indices[key]['position']]]['base_status']
 			elif key == 'LOCATION':
-				content = loc_map[row[indices[key]].strip()]['location']
+				content = loc_map[row[indices[key]['position']].strip()]['location']
 				library = ET.SubElement(item,'library')
-				library.text = loc_map[row[indices[key]].strip()]['library']
+				library.text = loc_map[row[indices[key]['position']].strip()]['library']
 			elif key == 'oclc':
 				value = None
-			elif key == 'NON_PUBLIC_NOTE_1' and row[indices['STATUS']]  != '-':
-				content =  "Status: " + status_map[row[indices['STATUS']]]['status_description'] 
-				if row[indices[key]]:
-					content +=  " | " + row[indices[key]]
+			elif "note" in value:
+				if row[indices[key]['position']]:
+					print key + " " +  indices[key]['itemheader']
+					content = indices[key]['itemheader'] + ": " +  row[indices[key]['position']]
 			else:
-				content = row[indices[key]]
+				content = row[indices[key]['position']]				
+			if key == 'NON_PUBLIC_NOTE_1' and row[indices['STATUS']['position']] == '-':
+				content = "Status: " + status_map[row[indices['STATUS']['position']]]['status_description'] + " | " + content
+			if key == 'NON_PUBLIC_NOTE_3':
+				content += ' | migration note: tech_freeze_migration'
 			element = ET.SubElement(item, value)
 			element.text = content
+
 	# also add physical_material_type in order to post item
 	element = ET.SubElement(item,'physical_material_type')
 	element.text = 'BOOK' # either map from ITYPE, try and get from bib or just set to default. 
@@ -240,7 +250,7 @@ def map_headers(header):
 	position = 0
 	for column in header:
 		if column in field_map:
-			index_map[field_map[column]] = position
+			index_map[field_map[column]] = {'position' : position, 'itemheader' : column}
 		position += 1
 	print(index_map)
 	return index_map
@@ -310,7 +320,8 @@ def check_for_holdings(bib_mms_id,loc):
 					return holding.find("holding_id").text
 				else:
 					return None
-			
+	else:
+		logging.info("Failed to create/get holding for: " + holding_url)		
 
 
 """
