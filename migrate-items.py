@@ -166,12 +166,16 @@ def read_items(item_file):
 		status_map = read_status_mapping(get_status_mapping())
 		loc_row = read_location_mapping(get_location_mapping())
 		for row in reader:
-			item_url = get_holding(row,indices,loc_row)
-			if item_url:
-				item_xml = make_item(row,indices,itype_map,status_map,loc_row)
-				post_item(item_url,item_xml)
+			item_exists = check_item_exists(row,indices)
+			if item_exists is False:
+				item_url = get_holding(row,indices,loc_row)
+				if item_url:
+					item_xml = make_item(row,indices,itype_map,status_map,loc_row)
+					post_item(item_url,item_xml)
+				else:
+					logging.info("Failed to create holdings, current item URL: " + item_url)
 			else:
-				logging.info("Failed to create holdings, current item URL: " + item_url)
+				logging.info("Item already exists in repository: " + row[indices['BARCODE']['position']])
 	finally:
 		f.close()
 
@@ -195,6 +199,24 @@ def get_holding(row,indices,loc_row):
 		return url
 	else:
 		logging.info("Bib record with OCLC number " + oclc + " not found in repository")
+
+
+
+"""
+	Check if item already exists in Alma, based on barcode
+	This is a little superfluous - Alma won't let us create two items with the same barcode. 
+"""
+def check_item_exists(row,indices):
+	barcode = row[indices['BARCODE']['position']]
+	sru =  get_sru_base() + get_campus_code() + '?version=1.2&operation=searchRetrieve&query=alma.all_for_ui=' + barcode
+	response = requests.get(sru)
+	bibs = ET.fromstring(response.content)
+	num_recs = bibs.find("{http://www.loc.gov/zing/srw/}numberOfRecords").text	
+	print num_recs
+	if num_recs == 0: 
+		return False
+	else:
+		return True
 
 
 """
@@ -343,7 +365,6 @@ def find_mms_id(oclc):
 
 
 """
-	MAIN
 	Check if item exists already in Alma
 	If item doesn't exist, pull bib data based on OCLC number
 	Create item and holding based on above mappings
