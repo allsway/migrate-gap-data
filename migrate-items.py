@@ -136,7 +136,7 @@ def read_itype_mapping(itype_map_file):
 """
 	Posts complete XML to Alma, including bib_data, holding_data and item_data elements
 """
-def post_item(item_url,item_xml):
+def post_item(item_url,item_xml,copy_id):
 	item = ET.Element('item')
 	bib_data = ET.SubElement(item,'bib_data')
 	bib_id = ET.SubElement(bib_data,'mms_id')
@@ -144,6 +144,8 @@ def post_item(item_url,item_xml):
 	holding_data = ET.SubElement(item,'holding_data')
 	holding_id = ET.SubElement(holding_data,'holding_id')
 	holding_id.text = item_url.split("/")[8]
+	copy_id = ET.SubElement(holding_data,'copy_id')
+	copy_id.text = '1'
 	item.append(item_xml)
 	print ET.tostring(item)
 	headers = {"Content-Type": "application/xml"}
@@ -171,7 +173,10 @@ def read_items(item_file):
 				item_url = get_holding(row,indices,loc_row)
 				if item_url:
 					item_xml = make_item(row,indices,itype_map,status_map,loc_row)
-					post_item(item_url,item_xml)
+					copy_id = ""
+					if row[indices['COPY #']['position']]:
+						copy_id = row[indices['COPY #']['position']]
+					post_item(item_url,item_xml,copy_id)
 				else:
 					logging.info("Failed to create holdings, current item URL: " + item_url)
 			else:
@@ -212,8 +217,8 @@ def check_item_exists(row,indices):
 	response = requests.get(sru)
 	bibs = ET.fromstring(response.content)
 	num_recs = bibs.find("{http://www.loc.gov/zing/srw/}numberOfRecords").text	
-	print num_recs
-	if num_recs == 0: 
+	if num_recs == '0': 
+		print num_recs
 		return False
 	else:
 		return True
@@ -234,9 +239,9 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 		if key in indices:
 			# exceptional mapping conditions
 			if key == 'I TYPE':
-				content = itype_map[row[indices[key]['position']]]
+				content = itype_map[row[indices[key]['position']].strip()]
 			elif key == 'STATUS':
-				content = status_map[row[indices[key]['position']]]['base_status']
+				content = status_map[row[indices[key]['position']].strip()]['base_status']
 			elif key == 'LOCATION':
 				content = loc_map[row[indices[key]['position']].strip()]['location']
 				library = ET.SubElement(item,'library')
@@ -248,8 +253,8 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 					print key + " " +  indices[key]['itemheader']
 					content = indices[key]['itemheader'] + ": " +  row[indices[key]['position']]
 			else:
-				content = row[indices[key]['position']]				
-			if key == 'NON_PUBLIC_NOTE_1' and row[indices['STATUS']['position']] == '-':
+				content = row[indices[key]['position']].strip()				
+			if key == 'NON_PUBLIC_NOTE_1' and row[indices['STATUS']['position']].strip() == '-':
 				content = "Status: " + status_map[row[indices['STATUS']['position']]]['status_description'] + " | " + content
 			if key == 'NON_PUBLIC_NOTE_3':
 				content += ' | migration note: tech_freeze_migration'
