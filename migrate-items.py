@@ -48,6 +48,7 @@ def get_authoritative_mapping():
 		'STATUS':'base_status',
 		'I TYPE':'policy',
 		'VOLUME':'description',
+		'COPY #':'copy_id',
 		'oclc': 'oclc',
 		'LOCATION':'location',
 		'PIECES':'pieces',
@@ -144,8 +145,8 @@ def post_item(item_url,item_xml,copy_id):
 	holding_data = ET.SubElement(item,'holding_data')
 	holding_id = ET.SubElement(holding_data,'holding_id')
 	holding_id.text = item_url.split("/")[8]
-	copy_id = ET.SubElement(holding_data,'copy_id')
-	copy_id.text = '1'
+	copy_num = ET.SubElement(holding_data,'copy_id')
+	copy_num.text = copy_id
 	item.append(item_xml)
 	print ET.tostring(item)
 	headers = {"Content-Type": "application/xml"}
@@ -166,7 +167,7 @@ def read_items(item_file):
 		indices = map_headers(header)
 		itype_map = read_itype_mapping(get_itype_mapping())
 		status_map = read_status_mapping(get_status_mapping())
-		loc_row = read_location_mapping(get_location_mapping())
+		loc_row = read_location_mapping(get_location_mapping()) #combine this with holding_data?
 		for row in reader:
 			item_exists = check_item_exists(row,indices)
 			if item_exists is False:
@@ -218,7 +219,6 @@ def check_item_exists(row,indices):
 	bibs = ET.fromstring(response.content)
 	num_recs = bibs.find("{http://www.loc.gov/zing/srw/}numberOfRecords").text	
 	if num_recs == '0': 
-		print num_recs
 		return False
 	else:
 		return True
@@ -250,7 +250,6 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 				value = None
 			elif "note" in value:
 				if row[indices[key]['position']]:
-					print key + " " +  indices[key]['itemheader']
 					content = indices[key]['itemheader'] + ": " +  row[indices[key]['position']]
 			else:
 				content = row[indices[key]['position']].strip()				
@@ -309,6 +308,12 @@ def get_holding_xml(loc_row):
 	subfield2 = ET.SubElement(datafield,'subfield')
 	subfield2.set('code','c')
 	subfield2.text = loc_row['location']
+	subfield3 = ET.SubElement(datafield,'subfield')
+	subfield3.set('code','h')
+	subfield3.text = 'sarina test h'
+	subfield4 = ET.SubElement(datafield,'subfield')
+	subfield4.set('code','i')
+	subfield4.text = 'test i'
 	return holding
 
 
@@ -318,16 +323,14 @@ def get_holding_xml(loc_row):
 """
 def make_holding(bib_mms_id,loc_row):
 	post_url = get_base_url() + '/bibs/' + str(bib_mms_id) + '/holdings?apikey=' + get_key()		
+	print post_url
 	headers = {"Content-Type": "application/xml"}
 	holding = get_holding_xml(loc_row)
-	print(ET.tostring(holding))
 	r = requests.post(post_url,data=ET.tostring(holding),headers=headers)
 	response = ET.fromstring(r.content)
-	print(ET.tostring(response))
 	if r.status_code == 200:
 		return response.find("holding_id").text
-
-			
+		
 	
 
 """
