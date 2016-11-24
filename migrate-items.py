@@ -179,27 +179,101 @@ def read_items(item_file):
 						copy_id = row[indices['COPY #']['position']]
 					post_item(item_url,item_xml,copy_id)
 				else:
-					logging.info("Failed to create holdings, current item URL: " + item_url)
+					logging.info("Failed to create holdings, current item: " + row[indices['BARCODE']['position']])
 			else:
 				logging.info("Item already exists in repository: " + row[indices['BARCODE']['position']])
 	finally:
 		f.close()
+
+
+
+
+"""
+	Use SRU to find matching bib record based on OCLC number. 
+	Returns MMS ID for the matching bib record, and call number parts from the bib record. 
+"""
+def find_mms_id(oclc):
+	# set url and campus code from config later, and pass to function
+	sru =  get_sru_base() + get_campus_code() + '?version=1.2&operation=searchRetrieve&query=alma.all_for_ui=' + oclc
+	response = requests.get(sru)
+	bib = ET.fromstring(response.content)
+	if response.status_code == 200:
+		bib_data = {}
+		for records in bib:
+			for record in records:
+				for recordData in record:
+					for r in recordData:
+						bib_data['mms_id'] = r.find("./controlfield[@tag='001']").text
+						bib_data['callnum_a'] = r.find("./datafield[@tag='050']/subfield[@code='a']").text
+						bib_data['callnum_b'] = r.find("./datafield[@tag='050']/subfield[@code='b']").text
+		return bib_data
+
+
+		
+""""
+	Creates holding with the following XML structure
+	<holding>
+		<record>
+			<datafield ind1='{call number type}' tag='852'>
+				<subfield code='b'>{location}</subfield>
+				<subfield code='c'>{library}</subfield>
+			</datafield>
+		</record>
+	</holding>
+	
+	Returns holding XML 
+"""
+def get_holding_xml(loc_row,bib_data):
+	holding = ET.Element('holding')
+	record = ET.SubElement(holding,'record')
+	datafield = ET.SubElement(record,'datafield')
+	datafield.set('ind1',loc_row['callnum'])
+	datafield.set('tag','852')
+	subfield1 = ET.SubElement(datafield,'subfield')
+	subfield1.set('code','b')
+	subfield1.text = loc_row['library']
+	subfield2 = ET.SubElement(datafield,'subfield')
+	subfield2.set('code','c')
+	subfield2.text = loc_row['location']
+	subfield3 = ET.SubElement(datafield,'subfield')
+	subfield3.set('code','h')
+	subfield3.text = bib_data['callnum_a']
+	subfield4 = ET.SubElement(datafield,'subfield')
+	subfield4.set('code','i')
+	subfield4.text = bib_data['callnum_b']
+	return holding
+
+
+"""
+	Creates post request with holding xml data to create new holding.  
+	Returns holding MMS ID to be used for item creation
+"""
+def make_holding(bib_data,loc_row):
+	post_url = get_base_url() + '/bibs/' + str(bib_data['mms_id']) + '/holdings?apikey=' + get_key()		
+	print post_url
+	headers = {"Content-Type": "application/xml"}
+	holding = get_holding_xml(loc_row,bib_data)
+	r = requests.post(post_url,data=ET.tostring(holding),headers=headers)
+	response = ET.fromstring(r.content)
+	if r.status_code == 200:
+		return response.find("holding_id").text
+
 
 """
 	Get bib info and create/get holdings for the item we are adding to repository 
 """
 def get_holding(row,indices,loc_row):
 	oclc =  row[indices['oclc']['position']].strip()
-	# Check if bib record exists, based on OCLC number.  If it exists, get mms id  
-	mms_id = find_mms_id(oclc)
-	if mms_id is not None:
+	bib_data = find_mms_id(oclc)
+	if bib_data['mms_id'] is not None:
+		mms_id = bib_data['mms_id']
 		print mms_id
 		if 'LOCATION' in indices:
 			location = row[indices['LOCATION']['position']].strip()
 			holding_id = check_for_holdings(mms_id,loc_row[location])
 		# If holding doesn't already exist, create holding
 		if holding_id is None:
-			holding_id = make_holding(mms_id,loc_row[location])
+			holding_id = make_holding(bib_data,loc_row[location])
 		print holding_id
 		url = create_url(mms_id,holding_id)
 		return url
@@ -259,7 +333,6 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 				content += ' | migration note: tech_freeze_migration'
 			element = ET.SubElement(item, value)
 			element.text = content
-
 	# also add physical_material_type in order to post item
 	element = ET.SubElement(item,'physical_material_type')
 	element.text = 'BOOK' # either map from ITYPE, try and get from bib or just set to default. 
@@ -282,54 +355,7 @@ def map_headers(header):
 	return index_map
 				
 	
-		
-""""
-	Creates holding with the following XML structure
-	<holding>
-		<record>
-			<datafield ind1='{call number type}' tag='852'>
-				<subfield code='b'>{location}</subfield>
-				<subfield code='c'>{library}</subfield>
-			</datafield>
-		</record>
-	</holding>
-	
-	Returns holding XML 
-"""
-def get_holding_xml(loc_row):
-	holding = ET.Element('holding')
-	record = ET.SubElement(holding,'record')
-	datafield = ET.SubElement(record,'datafield')
-	datafield.set('ind1',loc_row['callnum'])
-	datafield.set('tag','852')
-	subfield1 = ET.SubElement(datafield,'subfield')
-	subfield1.set('code','b')
-	subfield1.text = loc_row['library']
-	subfield2 = ET.SubElement(datafield,'subfield')
-	subfield2.set('code','c')
-	subfield2.text = loc_row['location']
-	subfield3 = ET.SubElement(datafield,'subfield')
-	subfield3.set('code','h')
-	subfield3.text = 'sarina test h'
-	subfield4 = ET.SubElement(datafield,'subfield')
-	subfield4.set('code','i')
-	subfield4.text = 'test i'
-	return holding
 
-
-"""
-	Creates post request with holding xml data to create new holding.  
-	Returns holding MMS ID to be used for item creation
-"""
-def make_holding(bib_mms_id,loc_row):
-	post_url = get_base_url() + '/bibs/' + str(bib_mms_id) + '/holdings?apikey=' + get_key()		
-	print post_url
-	headers = {"Content-Type": "application/xml"}
-	holding = get_holding_xml(loc_row)
-	r = requests.post(post_url,data=ET.tostring(holding),headers=headers)
-	response = ET.fromstring(r.content)
-	if r.status_code == 200:
-		return response.find("holding_id").text
 		
 	
 
@@ -354,21 +380,6 @@ def check_for_holdings(bib_mms_id,loc):
 		logging.info("Failed to create/get holding for: " + holding_url)		
 
 
-"""
-	Use SRU to find matching bib record based on OCLC number. 
-	Returns MMS ID for the matching bib record. 
-"""
-def find_mms_id(oclc):
-	# set url and campus code from config later, and pass to function
-	sru =  get_sru_base() + get_campus_code() + '?version=1.2&operation=searchRetrieve&query=alma.all_for_ui=' + oclc
-	response = requests.get(sru)
-	bib = ET.fromstring(response.content)
-	if response.status_code == 200:
-		for records in bib:
-			for record in records:
-				for recordData in record:
-					for record in recordData:
-						return record.find("./controlfield[@tag='001']").text
 
 
 
