@@ -98,8 +98,6 @@ def read_location_mapping(loc_map_file):
 	finally:
 		f.close()
 
-
-
 """
 	Read in status_map.csv and create map between old statuses and current base statuses, and description for note fields
 """
@@ -114,7 +112,6 @@ def read_status_mapping(status_map_file):
 		return status_mapping
 	finally:
 		f.close()
-
 
 """
 	Read in itype_map.csv and create map between old itype values and current itype policy codes
@@ -132,60 +129,19 @@ def read_itype_mapping(itype_map_file):
 	finally:
 		f.close()
 
-
-
 """
-	Posts complete XML to Alma, including bib_data, holding_data and item_data elements
+	Maps authoritative headers to indices in delivered item CSV file	
 """
-def post_item(item_url,item_xml,copy_id):
-	item = ET.Element('item')
-	bib_data = ET.SubElement(item,'bib_data')
-	bib_id = ET.SubElement(bib_data,'mms_id')
-	bib_id.text = item_url.split("/")[6]
-	holding_data = ET.SubElement(item,'holding_data')
-	holding_id = ET.SubElement(holding_data,'holding_id')
-	holding_id.text = item_url.split("/")[8]
-	copy_num = ET.SubElement(holding_data,'copy_id')
-	copy_num.text = copy_id
-	item.append(item_xml)
-	print ET.tostring(item)
-	headers = {"Content-Type": "application/xml"}
-	r = requests.post(item_url,data=ET.tostring(item),headers=headers)
-	print r.content
-	if r.status_code != 200:
-		logging.info("Failed to create item for: " + item_url)
-
-
-"""
-	Read in item data in csv format (item_data.csv)
-"""
-def read_items(item_file):
-	f  = open(item_file,'rt')
-	try:
-		reader = csv.reader(f)
-		header = reader.next()
-		indices = map_headers(header)
-		itype_map = read_itype_mapping(get_itype_mapping())
-		status_map = read_status_mapping(get_status_mapping())
-		loc_row = read_location_mapping(get_location_mapping()) #combine this with holding_data?
-		for row in reader:
-			item_exists = check_item_exists(row,indices)
-			if item_exists is False:
-				item_url = get_holding(row,indices,loc_row)
-				if item_url:
-					item_xml = make_item(row,indices,itype_map,status_map,loc_row)
-					copy_id = ""
-					if row[indices['COPY #']['position']]:
-						copy_id = row[indices['COPY #']['position']]
-					post_item(item_url,item_xml,copy_id)
-				else:
-					logging.info("Failed to create holdings, current item: " + row[indices['BARCODE']['position']])
-			else:
-				logging.info("Item already exists in repository: " + row[indices['BARCODE']['position']])
-	finally:
-		f.close()
-
-
+def map_headers(header):
+	index_map = {}
+	field_map = read_mapping(get_field_mapping())
+	print(field_map)
+	position = 0
+	for column in header:
+		if column in field_map:
+			index_map[field_map[column]] = {'position' : position, 'itemheader' : column}
+		position += 1
+	return index_map
 
 
 """
@@ -193,7 +149,6 @@ def read_items(item_file):
 	Returns MMS ID for the matching bib record, and call number parts from the bib record. 
 """
 def find_mms_id(oclc):
-	# set url and campus code from config later, and pass to function
 	sru =  get_sru_base() + get_campus_code() + '?version=1.2&operation=searchRetrieve&query=alma.all_for_ui=' + oclc
 	response = requests.get(sru)
 	bib = ET.fromstring(response.content)
@@ -217,6 +172,8 @@ def find_mms_id(oclc):
 			<datafield ind1='{call number type}' tag='852'>
 				<subfield code='b'>{location}</subfield>
 				<subfield code='c'>{library}</subfield>
+				<subfield code='h'>{call number subfield a}</subfield>
+				<subfield code='i'>{call number subfield b}</subfield>
 			</datafield>
 		</record>
 	</holding>
@@ -243,6 +200,25 @@ def get_holding_xml(loc_row,bib_data):
 	subfield4.text = bib_data['callnum_b']
 	return holding
 
+"""
+	Check if holding record exists
+	Check if mapped location from current ILS to Alma location mapping matches with any current holdings
+	Returns mms ID for holding if one exists
+"""
+def check_for_holdings(bib_mms_id,loc):
+	holding_url = get_base_url() + '/bibs/' + str(bib_mms_id) + '/holdings?apikey=' + get_key()
+	response = requests.get(holding_url)
+	holdings = ET.fromstring(response.content)
+	if response.status_code == 200:
+		for holding in holdings.findall("holding"):
+			location = holding.find("location").text
+			if location:
+				if location.strip() == loc['location'].strip():
+					return holding.find("holding_id").text
+				else:
+					return None
+	else:
+		logging.info("Failed to create/get holding for: " + holding_url)		
 
 """
 	Creates post request with holding xml data to create new holding.  
@@ -257,7 +233,6 @@ def make_holding(bib_data,loc_row):
 	response = ET.fromstring(r.content)
 	if r.status_code == 200:
 		return response.find("holding_id").text
-
 
 """
 	Get bib info and create/get holdings for the item we are adding to repository 
@@ -327,7 +302,7 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 					content = indices[key]['itemheader'] + ": " +  row[indices[key]['position']]
 			else:
 				content = row[indices[key]['position']].strip()				
-			if key == 'NON_PUBLIC_NOTE_1' and row[indices['STATUS']['position']].strip() == '-':
+			if key == 'NON_PUBLIC_NOTE_1' and row[indices['STATUS']['position']].strip() != '-':
 				content = "Status: " + status_map[row[indices['STATUS']['position']]]['status_description'] + " | " + content
 			if key == 'NON_PUBLIC_NOTE_3':
 				content += ' | migration note: tech_freeze_migration'
@@ -336,67 +311,72 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 	# also add physical_material_type in order to post item
 	element = ET.SubElement(item,'physical_material_type')
 	element.text = 'BOOK' # either map from ITYPE, try and get from bib or just set to default. 
-	return item
+	return item		
 	
-
 """
-	Maps authoritative headers to indices	
+	Posts complete XML to Alma, including bib_data, holding_data and item_data elements
 """
-def map_headers(header):
-	index_map = {}
-	field_map = read_mapping(get_field_mapping())
-	print(field_map)
-	position = 0
-	for column in header:
-		if column in field_map:
-			index_map[field_map[column]] = {'position' : position, 'itemheader' : column}
-		position += 1
-	print(index_map)
-	return index_map
-				
+def post_item(item_url,item_xml,copy_id):
+	item = ET.Element('item')
+	bib_data = ET.SubElement(item,'bib_data')
+	bib_id = ET.SubElement(bib_data,'mms_id')
+	bib_id.text = item_url.split("/")[6]
+	holding_data = ET.SubElement(item,'holding_data')
+	holding_id = ET.SubElement(holding_data,'holding_id')
+	holding_id.text = item_url.split("/")[8]
+	copy_num = ET.SubElement(holding_data,'copy_id')
+	copy_num.text = copy_id
+	item.append(item_xml)
+	print ET.tostring(item)
+	headers = {"Content-Type": "application/xml"}
+	r = requests.post(item_url,data=ET.tostring(item),headers=headers)
+	print r.content
+	if r.status_code != 200:
+		logging.info("Failed to create item for: " + item_url)
 	
-
-		
-	
-
 """
-	Check if holding record exists
-	Check if mapped location from current ILS to Alma location mapping matches with any current holdings
-	Returns mms ID for holding if one exists
+	Reads in item data in csv format (item_data.csv), 
+	Checks for the corresponding bib record, creates a holding record if no applicable holding record exists
+	Creates item record using all mapped data
 """
-def check_for_holdings(bib_mms_id,loc):
-	holding_url = get_base_url() + '/bibs/' + str(bib_mms_id) + '/holdings?apikey=' + get_key()
-	response = requests.get(holding_url)
-	holdings = ET.fromstring(response.content)
-	if response.status_code == 200:
-		for holding in holdings.findall("holding"):
-			location = holding.find("location").text
-			if location:
-				if location.strip() == loc['location'].strip():
-					return holding.find("holding_id").text
+def read_items(item_file):
+	f  = open(item_file,'rt')
+	try:
+		reader = csv.reader(f)
+		header = reader.next()
+		indices = map_headers(header)
+		itype_map = read_itype_mapping(get_itype_mapping())
+		status_map = read_status_mapping(get_status_mapping())
+		loc_row = read_location_mapping(get_location_mapping()) #combine this with holding_data?
+		for row in reader:
+			item_exists = check_item_exists(row,indices)
+			if item_exists is False:
+				item_url = get_holding(row,indices,loc_row)
+				if item_url:
+					item_xml = make_item(row,indices,itype_map,status_map,loc_row)
+					copy_id = ""
+					if row[indices['COPY #']['position']]:
+						copy_id = row[indices['COPY #']['position']]
+					post_item(item_url,item_xml,copy_id)
 				else:
-					return None
-	else:
-		logging.info("Failed to create/get holding for: " + holding_url)		
-
-
-
+					logging.info("Failed to create holdings, current item: " + row[indices['BARCODE']['position']])
+			else:
+				logging.info("Item already exists in repository: " + row[indices['BARCODE']['position']])
+	finally:
+		f.close()
 
 
 """
-	Check if item exists already in Alma
-	If item doesn't exist, pull bib data based on OCLC number
-	Create item and holding based on above mappings
-	Send item XMl POST request to Alma 
+	Read in configuration file and set up logging
+	Call read_items() on the file of item records
 """
 
 # Read campus configuration parameters
 config = ConfigParser.RawConfigParser()
 config.read(sys.argv[1])
-
 logging.basicConfig(filename='status.log',level=logging.DEBUG)
-
 items_file = sys.argv[2]
+
 read_items(items_file)
 
 
