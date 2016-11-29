@@ -239,9 +239,12 @@ def make_holding(bib_data,loc_row):
 """
 def get_holding(row,indices,loc_row):
 	oclc =  row[indices['oclc']['position']].strip()
+	print oclc
+	mms_id = None
 	bib_data = find_mms_id(oclc)
-	if bib_data['mms_id'] is not None:
+	if bib_data:
 		mms_id = bib_data['mms_id']
+	if mms_id is not None:
 		print mms_id
 		if 'LOCATION' in indices:
 			location = row[indices['LOCATION']['position']].strip()
