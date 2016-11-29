@@ -1,6 +1,7 @@
 #!/usr/bin/python
 import requests
 import sys
+import re
 import csv
 import ConfigParser
 import logging
@@ -159,8 +160,14 @@ def find_mms_id(oclc):
 				for recordData in record:
 					for r in recordData:
 						bib_data['mms_id'] = r.find("./controlfield[@tag='001']").text
-						bib_data['callnum_a'] = r.find("./datafield[@tag='050']/subfield[@code='a']").text
-						bib_data['callnum_b'] = r.find("./datafield[@tag='050']/subfield[@code='b']").text
+						if r.find("./datafield[@tag='050']/subfield[@code='a']") is not None:
+							bib_data['callnum_a'] = r.find("./datafield[@tag='050']/subfield[@code='a']").text
+						else:
+							bib_data['callnum_a'] = None
+						if r.find("./datafield[@tag='050']/subfield[@code='b']") is not None:
+							bib_data['callnum_b'] = r.find("./datafield[@tag='050']/subfield[@code='b']").text
+						else:
+							bib_data['callnum_b'] = None
 		return bib_data
 
 
@@ -192,12 +199,14 @@ def get_holding_xml(loc_row,bib_data):
 	subfield2 = ET.SubElement(datafield,'subfield')
 	subfield2.set('code','c')
 	subfield2.text = loc_row['location']
-	subfield3 = ET.SubElement(datafield,'subfield')
-	subfield3.set('code','h')
-	subfield3.text = bib_data['callnum_a']
-	subfield4 = ET.SubElement(datafield,'subfield')
-	subfield4.set('code','i')
-	subfield4.text = bib_data['callnum_b']
+	if bib_data['callnum_a']:
+		subfield3 = ET.SubElement(datafield,'subfield')
+		subfield3.set('code','h')
+		subfield3.text = bib_data['callnum_a']
+	if bib_data['callnum_b']:
+		subfield4 = ET.SubElement(datafield,'subfield')
+		subfield4.set('code','i')
+		subfield4.text = bib_data['callnum_b']
 	return holding
 
 """
@@ -239,12 +248,11 @@ def make_holding(bib_data,loc_row):
 """
 def get_holding(row,indices,loc_row):
 	oclc =  row[indices['oclc']['position']].strip()
+	oclc = re.sub("[^0-9]", "", oclc)
 	print oclc
-	mms_id = None
 	bib_data = find_mms_id(oclc)
 	if bib_data:
 		mms_id = bib_data['mms_id']
-	if mms_id is not None:
 		print mms_id
 		if 'LOCATION' in indices:
 			location = row[indices['LOCATION']['position']].strip()
@@ -284,6 +292,7 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 	mapping = get_authoritative_mapping()
 	item = ET.Element('item_data')
 	for key, value in mapping.iteritems():
+		content = ""
 		if key == 'NON_PUBLIC_NOTE_3' and key not in indices:
 			 content = 'migration note: tech_freeze_migration'
 			 element = ET.SubElement(item, value)
@@ -304,11 +313,14 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 				if row[indices[key]['position']]:
 					content = indices[key]['itemheader'] + ": " +  row[indices[key]['position']]
 			else:
-				content = row[indices[key]['position']].strip()				
+				content = row[indices[key]['position']].strip()
 			if key == 'NON_PUBLIC_NOTE_1' and row[indices['STATUS']['position']].strip() != '-':
 				content = "Status: " + status_map[row[indices['STATUS']['position']]]['status_description'] + " | " + content
 			if key == 'NON_PUBLIC_NOTE_3':
-				content += ' | migration note: tech_freeze_migration'
+				if row[indices['NON_PUBLIC_NOTE_3']['position']]:
+					content += ' | migration note: tech_freeze_migration'
+				else:
+					content += 'migration note: tech_freeze_migration'
 			element = ET.SubElement(item, value)
 			element.text = content
 	# also add physical_material_type in order to post item
