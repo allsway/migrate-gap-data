@@ -297,6 +297,11 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 			 content = 'migration note: tech_freeze_migration'
 			 element = ET.SubElement(item, value)
 			 element.text = content
+		if key == 'NON_PUBLIC_NOTE_1' and key not in indices:
+			if row[indices['STATUS']['position']].strip() !=  "-":
+				content = "Status: " + status_map[row[indices['STATUS']['position']].strip()]['status_description']
+				element = ET.SubElement(item, value)
+				element.text = content
 		if key in indices:
 			# exceptional mapping conditions
 			if key == 'I TYPE':
@@ -314,8 +319,9 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 					content = indices[key]['itemheader'] + ": " +  row[indices[key]['position']]
 			else:
 				content = row[indices[key]['position']].strip()
-			if key == 'NON_PUBLIC_NOTE_1' and row[indices['STATUS']['position']].strip() != '-':
-				content = "Status: " + status_map[row[indices['STATUS']['position']]]['status_description'] + " | " + content
+			if key == 'NON_PUBLIC_NOTE_1' and row[indices['STATUS']['position']].strip() != "-" :
+				print "Got into status mapping"
+				content = "Status: " + status_map[row[indices['STATUS']['position']].strip()]['status_description'] + " | " + content
 			if key == 'NON_PUBLIC_NOTE_3':
 				if row[indices['NON_PUBLIC_NOTE_3']['position']]:
 					content += ' | migration note: tech_freeze_migration'
