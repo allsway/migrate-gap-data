@@ -182,6 +182,8 @@ def find_mms_id(oclc):
 								bib_data['callnum_b'] = r.find("./datafield[@tag='050']/subfield[@code='b']").text
 							else:
 								bib_data['callnum_b'] = None
+						else:
+							logging.info("OCLC not fount in 035 field: " + oclc)
 		return bib_data
 
 
