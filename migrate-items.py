@@ -146,6 +146,17 @@ def map_headers(header):
 
 
 """
+	Check if the OCLC number is actually in the 035 field
+	There are still some potential errors here, but there's not too much we can do about that. 
+"""
+def check_marc_field(oclc,r):
+	fields = r.findall("./datafield[@tag='035']/subfield")
+	for field in fields:
+		print field.text
+		if oclc in field.text:
+			return True
+
+"""
 	Use SRU to find matching bib record based on OCLC number. 
 	Returns MMS ID for the matching bib record, and call number parts from the bib record. 
 """
@@ -159,15 +170,18 @@ def find_mms_id(oclc):
 			for record in records:
 				for recordData in record:
 					for r in recordData:
-						bib_data['mms_id'] = r.find("./controlfield[@tag='001']").text
-						if r.find("./datafield[@tag='050']/subfield[@code='a']") is not None:
-							bib_data['callnum_a'] = r.find("./datafield[@tag='050']/subfield[@code='a']").text
-						else:
-							bib_data['callnum_a'] = None
-						if r.find("./datafield[@tag='050']/subfield[@code='b']") is not None:
-							bib_data['callnum_b'] = r.find("./datafield[@tag='050']/subfield[@code='b']").text
-						else:
-							bib_data['callnum_b'] = None
+						in_035 = check_marc_field(oclc,r)
+						print in_035
+						if in_035 is True:
+							bib_data['mms_id'] = r.find("./controlfield[@tag='001']").text
+							if r.find("./datafield[@tag='050']/subfield[@code='a']") is not None:
+								bib_data['callnum_a'] = r.find("./datafield[@tag='050']/subfield[@code='a']").text
+							else:
+								bib_data['callnum_a'] = None
+							if r.find("./datafield[@tag='050']/subfield[@code='b']") is not None:
+								bib_data['callnum_b'] = r.find("./datafield[@tag='050']/subfield[@code='b']").text
+							else:
+								bib_data['callnum_b'] = None
 		return bib_data
 
 
