@@ -11,14 +11,28 @@ Migrates new items created during the technical freeze period to Alma via the Al
 ####Pre-requisite setup
 Set up SRU integration profile in Alma for OCLC number bib lookup
 
+####config.txt file
+In addition to the API, SRU and campus code information, the configuration file stores the data inputs listed above
+```
+[Params]
+apikey: apikey 
+baseurl: host
+campuscode: campuscode
+sru: base sru URL
+fieldmap: path_to_data_inputs/item_field_map.csv
+locationmap: path_to_data_inputs/location.csv
+statusmap: path_to_data_inputs/status_map.csv
+itypemap: path_to_data_inputs/itype_map.csv
+```
+
 ####migrate-items.py
 Takes as arguments:
-    - the configuration file listed above
-    - a csv file of item records from the source system
+- the configuration file as listed above
+- a csv file of item records from the source system
 
-Run as `python migrate-items.py config.txt item_data.csv`
+Run as `python ./migrate-items.py {config.txt} {item_data.csv}`
 
 Creates:
    - A holding record for every item in the CSV file (if the holding and item don't already exist in Alma)
    - An item record for every item in the CSV file, if the item barcode doesn't already exist in Alma
-   - errors.log file, recording any errors and any holdings/items that were not successfully created in Alma
+   - status.log file, recording any errors and any holdings/items that were not successfully created in Alma
