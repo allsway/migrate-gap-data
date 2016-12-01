@@ -172,7 +172,7 @@ def find_mms_id(oclc):
 					for r in recordData:
 						in_035 = check_marc_field(oclc,r)
 						print in_035
-						if in_035 is True:
+						if in_035:
 							bib_data['mms_id'] = r.find("./controlfield[@tag='001']").text
 							if r.find("./datafield[@tag='050']/subfield[@code='a']") is not None:
 								bib_data['callnum_a'] = r.find("./datafield[@tag='050']/subfield[@code='a']").text
@@ -387,7 +387,7 @@ def read_items(item_file):
 		loc_row = read_location_mapping(get_location_mapping()) #combine this with holding_data?
 		for row in reader:
 			item_exists = check_item_exists(row,indices)
-			if item_exists is False:
+			if not item_exists:
 				item_url = get_holding(row,indices,loc_row)
 				if item_url:
 					item_xml = make_item(row,indices,itype_map,status_map,loc_row)
