@@ -7,7 +7,12 @@ import ConfigParser
 import logging
 import xml.etree.ElementTree as ET
 
-
+"""
+	Run as python ./migrate-items.py {config.txt} {item_data.csv}
+	Takes in csv file of item data from Millennium or Sierra source system (could be modified to fit other source systems)
+	Based on the field mapping form for your migration from Millennium/Sierra to Alma, maps the fields to the appropriate Alma fields
+	Creates items and holdings for any items in the provided data file that don't exist in Alma. 
+"""
 
 def get_key():
 	return config.get('Params', 'apikey')
@@ -33,7 +38,9 @@ def get_status_mapping():
 def get_itype_mapping():
 	return config.get('Params', 'itypemap')
 	
-	
+"""
+	Creates the Alma /items API link
+"""	
 def create_url(mms_id,holding_id):
 	return get_base_url() +  '/bibs/' + mms_id + '/holdings/'+ holding_id +'/items?apikey=' + get_key(); 
 		
@@ -170,10 +177,10 @@ def get_call_num(r,subfield):
 def find_mms_id(oclc):
 	sru =  get_sru_base() + get_campus_code() + '?version=1.2&operation=searchRetrieve&query=alma.all_for_ui=' + oclc
 	response = requests.get(sru)
-	bib = ET.fromstring(response.content)
 	if response.status_code != 200:
 		logging.info("Failed to get response from SRU: " + sru)
 		return None
+	bib = ET.fromstring(response.content)
 	bib_data = {}
 	namespace = "{http://www.loc.gov/zing/srw/}"
 	for record in bib.findall(namespace + "records/" + namespace + "record/" + namespace + "recordData/record"):
@@ -182,7 +189,7 @@ def find_mms_id(oclc):
 			bib_data['callnum_a'] = get_call_num(record,'a')
 			bib_data['callnum_b']  = get_call_num(record,'b')
 		else:
-			logging.info("OCLC not fount in 035 field: " + oclc)
+			logging.info("OCLC not found in 035 field: " + oclc)
 	return bib_data
 
 
