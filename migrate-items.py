@@ -157,6 +157,13 @@ def check_marc_field(oclc,r):
 			return True
 
 """
+	Returns call number subfield from 050 field (could expand this to other call number fields)
+"""
+def get_call_num(r,subfield):
+	if r.find("./datafield[@tag='050']/subfield[@code='"+ subfield +"']") is not None:
+		return r.find("./datafield[@tag='050']/subfield[@code='" + subfield + "']").text
+
+"""
 	Use SRU to find matching bib record based on OCLC number. 
 	Returns MMS ID for the matching bib record, and call number parts from the bib record. 
 """
@@ -164,27 +171,19 @@ def find_mms_id(oclc):
 	sru =  get_sru_base() + get_campus_code() + '?version=1.2&operation=searchRetrieve&query=alma.all_for_ui=' + oclc
 	response = requests.get(sru)
 	bib = ET.fromstring(response.content)
-	if response.status_code == 200:
-		bib_data = {}
-		for records in bib:
-			for record in records:
-				for recordData in record:
-					for r in recordData:
-						in_035 = check_marc_field(oclc,r)
-						print in_035
-						if in_035:
-							bib_data['mms_id'] = r.find("./controlfield[@tag='001']").text
-							if r.find("./datafield[@tag='050']/subfield[@code='a']") is not None:
-								bib_data['callnum_a'] = r.find("./datafield[@tag='050']/subfield[@code='a']").text
-							else:
-								bib_data['callnum_a'] = None
-							if r.find("./datafield[@tag='050']/subfield[@code='b']") is not None:
-								bib_data['callnum_b'] = r.find("./datafield[@tag='050']/subfield[@code='b']").text
-							else:
-								bib_data['callnum_b'] = None
-						else:
-							logging.info("OCLC not fount in 035 field: " + oclc)
-		return bib_data
+	if response.status_code != 200:
+		logging.info("Failed to get response from SRU: " + sru)
+		return None
+	bib_data = {}
+	namespace = "{http://www.loc.gov/zing/srw/}"
+	for record in bib.findall(namespace + "records/" + namespace + "record/" + namespace + "recordData/record"):
+		if check_marc_field(oclc,record):
+			bib_data['mms_id'] = record.find("./controlfield[@tag='001']").text
+			bib_data['callnum_a'] = get_call_num(record,'a')
+			bib_data['callnum_b']  = get_call_num(record,'b')
+		else:
+			logging.info("OCLC not fount in 035 field: " + oclc)
+	return bib_data
 
 
 		
@@ -234,16 +233,16 @@ def check_for_holdings(bib_mms_id,loc):
 	holding_url = get_base_url() + '/bibs/' + str(bib_mms_id) + '/holdings?apikey=' + get_key()
 	response = requests.get(holding_url)
 	holdings = ET.fromstring(response.content)
-	if response.status_code == 200:
-		for holding in holdings.findall("holding"):
-			location = holding.find("location").text
-			if location:
-				if location.strip() == loc['location'].strip():
-					return holding.find("holding_id").text
-				else:
-					return None
-	else:
-		logging.info("Failed to create/get holding for: " + holding_url)		
+	if response.status_code != 200:
+		logging.info("Failed to create/get holding for: " + holding_url)
+		return None
+	for holding in holdings.findall("holding"):
+		location = holding.find("location").text
+		if location:
+			if location.strip() == loc['location'].strip():
+				return holding.find("holding_id").text
+			else:
+				return None	
 
 """
 	Creates post request with holding xml data to create new holding.  
@@ -260,7 +259,7 @@ def make_holding(bib_data,loc_row):
 		return response.find("holding_id").text
 
 """
-	Get bib info and create/get holdings for the item we are adding to repository 
+	Get bib info and gets (or creates) holdings for the item we are adding to repository 
 """
 def get_holding(row,indices,loc_row):
 	oclc =  row[indices['oclc']['position']].strip()
@@ -271,7 +270,7 @@ def get_holding(row,indices,loc_row):
 		mms_id = bib_data['mms_id']
 		print mms_id
 		if 'LOCATION' in indices:
-			location = row[indices['LOCATION']['position']].strip()
+			location = return_column_data(row,'LOCATION',indices)
 			holding_id = check_for_holdings(mms_id,loc_row[location])
 		# If holding doesn't already exist, create holding
 		if holding_id is None:
@@ -289,7 +288,7 @@ def get_holding(row,indices,loc_row):
 	This is a little superfluous - Alma won't let us create two items with the same barcode. 
 """
 def check_item_exists(row,indices):
-	barcode = row[indices['BARCODE']['position']]
+	barcode = return_column_data(row,'BARCODE',indices)
 	sru =  get_sru_base() + get_campus_code() + '?version=1.2&operation=searchRetrieve&query=alma.all_for_ui=' + barcode
 	response = requests.get(sru)
 	bibs = ET.fromstring(response.content)
@@ -299,6 +298,11 @@ def check_item_exists(row,indices):
 	else:
 		return True
 
+"""
+	Returns the data in the column 'column' for our row of data
+"""
+def return_column_data(row,column,indices):
+	return row[indices[column]['position']].strip()
 
 """
 	Create item_data xml content, based on mapping conditions.  
@@ -308,38 +312,39 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 	mapping = get_authoritative_mapping()
 	item = ET.Element('item_data')
 	for key, value in mapping.iteritems():
+		status_code = return_column_data(row,'STATUS',indices)
 		content = ""
 		if key == 'NON_PUBLIC_NOTE_3' and key not in indices:
 			 content = 'migration note: tech_freeze_migration'
 			 element = ET.SubElement(item, value)
 			 element.text = content
 		if key == 'NON_PUBLIC_NOTE_1' and key not in indices:
-			if row[indices['STATUS']['position']].strip() !=  "-":
-				content = "Status: " + status_map[row[indices['STATUS']['position']].strip()]['status_description']
+			if status_code:
+				content = "Status: " + status_map[status_code]['status_description']
 				element = ET.SubElement(item, value)
 				element.text = content
 		if key in indices:
 			# exceptional mapping conditions
+			column_data = return_column_data(row,key,indices)
 			if key == 'I TYPE':
-				content = itype_map[row[indices[key]['position']].strip()]
+				content = itype_map[column_data]
 			elif key == 'STATUS':
-				content = status_map[row[indices[key]['position']].strip()]['base_status']
+				content = status_map[column_data]['base_status']
 			elif key == 'LOCATION':
-				content = loc_map[row[indices[key]['position']].strip()]['location']
+				content = loc_map[column_data]['location']
 				library = ET.SubElement(item,'library')
-				library.text = loc_map[row[indices[key]['position']].strip()]['library']
+				library.text = loc_map[column_data]['library']
 			elif key == 'oclc':
 				value = None
 			elif "note" in value:
-				if row[indices[key]['position']]:
-					content = indices[key]['itemheader'] + ": " +  row[indices[key]['position']]
+				if column_data:
+					content = indices[key]['itemheader'] + ": " +  column_data
 			else:
-				content = row[indices[key]['position']].strip()
-			if key == 'NON_PUBLIC_NOTE_1' and row[indices['STATUS']['position']].strip() != "-" :
-				print "Got into status mapping"
-				content = "Status: " + status_map[row[indices['STATUS']['position']].strip()]['status_description'] + " | " + content
+				content = column_data
+			if key == 'NON_PUBLIC_NOTE_1' and status_code != "-" :
+				content = "Status: " + status_map[status_code]['status_description'] + " | " + content
 			if key == 'NON_PUBLIC_NOTE_3':
-				if row[indices['NON_PUBLIC_NOTE_3']['position']]:
+				if return_column_data(row,'NON_PUBLIC_NOTE_3',indices):
 					content += ' | migration note: tech_freeze_migration'
 				else:
 					content += 'migration note: tech_freeze_migration'
@@ -351,7 +356,7 @@ def make_item(row,indices,itype_map,status_map,loc_map):
 	return item		
 	
 """
-	Posts complete XML to Alma, including bib_data, holding_data and item_data elements
+	Posts complete item XML to Alma, including bib_data, holding_data and item_data elements
 """
 def post_item(item_url,item_xml,copy_id):
 	item = ET.Element('item')
@@ -384,7 +389,7 @@ def read_items(item_file):
 		indices = map_headers(header)
 		itype_map = read_itype_mapping(get_itype_mapping())
 		status_map = read_status_mapping(get_status_mapping())
-		loc_row = read_location_mapping(get_location_mapping()) #combine this with holding_data?
+		loc_row = read_location_mapping(get_location_mapping()) 
 		for row in reader:
 			item_exists = check_item_exists(row,indices)
 			if not item_exists:
