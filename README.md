@@ -10,6 +10,7 @@ Migrates new items created during the technical freeze period to Alma via the Al
 
 ####Pre-requisite setup
 Set up SRU integration profile in Alma for OCLC number bib lookup
+Add line `oclc,035|a` to the field mapping form file (item_map.csv in this example)
 
 ####config.txt file
 In addition to the API, SRU and campus code information, the configuration file stores the data inputs listed above
